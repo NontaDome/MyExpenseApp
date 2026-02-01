@@ -18,7 +18,7 @@ try:
     gc = gspread.authorize(creds)
     
     # URL ของ Google Sheets (*** อย่าลืมแก้ลิงก์ตรงนี้นะครับ ***)
-    sheet_url = "https://docs.google.com/spreadsheets/d/xxxxxxxxxxxxxxxxxxxx/edit" 
+    sheet_url = "https://docs.google.com/spreadsheets/d/1FbKe-hHVNi7Suo_XlP06qa8kcItPAoQzNNOFvsK38Ss/edit?gid=0#gid=0" 
     sh = gc.open_by_url(sheet_url)
     worksheet = sh.sheet1
 except Exception as e:
