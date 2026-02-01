@@ -10,14 +10,13 @@ import plotly.express as px
 # -------------------------------------------------------
 st.set_page_config(page_title="My Expense App", page_icon="💰", layout="wide")
 
-# โหลด Secrets
 try:
     secrets = st.secrets["gcp_service_account"]
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(secrets, scopes=scopes)
     gc = gspread.authorize(creds)
     
-    # URL ของ Google Sheets (*** อย่าลืมแก้ลิงก์ตรงนี้นะครับ ***)
+    # *** อย่าลืมแก้ลิงก์ Google Sheets ตรงนี้เหมือนเดิมนะครับ ***
     sheet_url = "https://docs.google.com/spreadsheets/d/1FbKe-hHVNi7Suo_XlP06qa8kcItPAoQzNNOFvsK38Ss/edit?gid=0#gid=0" 
     sh = gc.open_by_url(sheet_url)
     worksheet = sh.sheet1
@@ -25,7 +24,7 @@ except Exception as e:
     st.error(f"เกิดข้อผิดพลาดในการเชื่อมต่อ: {e}")
     st.stop()
 
-# ฟังก์ชันสำหรับโหลดข้อมูล
+# ฟังก์ชันโหลดข้อมูล
 def load_data():
     data = worksheet.get_all_records()
     if data:
@@ -35,10 +34,26 @@ def load_data():
         return df
     return pd.DataFrame()
 
+# 🎨 ฟังก์ชันสำหรับใส่สีในตาราง (Feature ใหม่)
+def highlight_rows(val):
+    # 1. แยกสี รายรับ (เขียว) / รายจ่าย (แดง)
+    if val == 'รายรับ':
+        return 'color: #28a745; font-weight: bold' # สีเขียว
+    elif val == 'รายจ่าย':
+        return 'color: #dc3545; font-weight: bold' # สีแดง
+    
+    # 2. แยกสี บัญชี
+    elif val == 'บัญชีออมทรัพย์':
+        return 'color: #007bff; font-weight: bold' # สีน้ำเงิน
+    elif val == 'บัญชีเงินฝากดอกเบี้ยสูง':
+        return 'color: #fd7e14; font-weight: bold' # สีส้ม
+        
+    return ''
+
 # -------------------------------------------------------
 # 2. ส่วนหน้าจอแอป
 # -------------------------------------------------------
-st.title("💰 บันทึกรายรับ-รายจ่าย (Pro Version)")
+st.title("💰 บันทึกรายรับ-รายจ่าย (Color Version)")
 
 tab1, tab2 = st.tabs(["📝 บันทึกข้อมูล", "📊 วิเคราะห์แดชบอร์ด"])
 
@@ -46,14 +61,9 @@ tab1, tab2 = st.tabs(["📝 บันทึกข้อมูล", "📊 วิ�
 with tab1:
     with st.form("expense_form", clear_on_submit=True):
         c1, c2, c3 = st.columns(3)
-        with c1: 
-            date_input = st.date_input("วันที่", datetime.date.today())
-        with c2: 
-            # 🛠️ แก้ไขตรงนี้: เปลี่ยน step=1 เป็น step=60 (หน่วยเป็นวินาที คือ 1 นาที)
-            # จะทำให้เลือกนาทีได้เป๊ะๆ เช่น 12:13, 12:14 ไม่ต้องรอรอบ 15 นาทีครับ
-            time_input = st.time_input("เวลา", value=datetime.datetime.now().time(), step=60)
-        with c3: 
-            t_type = st.radio("ประเภท", ["รายจ่าย", "รายรับ"], horizontal=True)
+        with c1: date_input = st.date_input("วันที่", datetime.date.today())
+        with c2: time_input = st.time_input("เวลา", value=datetime.datetime.now().time(), step=60)
+        with c3: t_type = st.radio("ประเภท", ["รายจ่าย", "รายรับ"], horizontal=True)
 
         c4, c5 = st.columns(2)
         with c4: account = st.selectbox("บัญชี", ["บัญชีออมทรัพย์", "บัญชีเงินฝากดอกเบี้ยสูง", "เงินสด", "บัตรเครดิต", "อื่นๆ"])
@@ -77,6 +87,17 @@ with tab1:
             st.success("บันทึกเรียบร้อย!")
             st.cache_data.clear()
 
+    # แสดงประวัติล่าสุด (พร้อมสี)
+    st.divider()
+    st.subheader("📋 ประวัติล่าสุด")
+    df_history = load_data()
+    if not df_history.empty:
+        # ใช้ style.applymap เพื่อใส่สี
+        st.dataframe(
+            df_history.tail(5).sort_index(ascending=False).style.applymap(highlight_rows), 
+            use_container_width=True
+        )
+
 # ================= แท็บ 2: แดชบอร์ด =================
 with tab2:
     st.header("📈 สรุปผลการเงิน")
@@ -93,19 +114,28 @@ with tab2:
         def show_summary(dataframe, group_col, title):
             summary = dataframe.groupby([group_col, 'Type'])['Amount'].sum().reset_index()
             pivot_df = summary.pivot(index=group_col, columns='Type', values='Amount').fillna(0)
+            
             if 'รายรับ' not in pivot_df.columns: pivot_df['รายรับ'] = 0
             if 'รายจ่าย' not in pivot_df.columns: pivot_df['รายจ่าย'] = 0
+            
             pivot_df['คงเหลือสุทธิ'] = pivot_df['รายรับ'] - pivot_df['รายจ่าย']
             pivot_df = pivot_df.sort_index(ascending=False)
 
             st.subheader(f"กราฟเปรียบเทียบ {title}")
             fig = px.bar(summary, x=group_col, y='Amount', color='Type', barmode='group',
-                         color_discrete_map={'รายรับ':'#66BB6A', 'รายจ่าย':'#EF5350'})
+                         color_discrete_map={'รายรับ':'#28a745', 'รายจ่าย':'#dc3545'}) # เปลี่ยนสีกราฟให้ตรงกัน
             st.plotly_chart(fig, use_container_width=True)
 
             st.subheader(f"ตารางสรุป {title}")
-            display_df = pivot_df.copy().applymap(lambda x: f"{x:,.2f}")
-            st.dataframe(display_df, use_container_width=True)
+            
+            # การใส่สีในตารางสรุป (Pivot Table)
+            # เราจะระบายสีตัวเลข: รายรับ=เขียว, รายจ่าย=แดง
+            styled_df = pivot_df.style.format("{:,.2f}") \
+                .applymap(lambda x: 'color: #28a745; font-weight: bold', subset=['รายรับ']) \
+                .applymap(lambda x: 'color: #dc3545; font-weight: bold', subset=['รายจ่าย']) \
+                .applymap(lambda x: 'color: blue; font-weight: bold' if x > 0 else 'color: red; font-weight: bold', subset=['คงเหลือสุทธิ'])
+
+            st.dataframe(styled_df, use_container_width=True)
 
         with subtab1: show_summary(df, 'Day', "รายวัน")
         with subtab2: show_summary(df, 'Week', "รายสัปดาห์")
@@ -113,7 +143,8 @@ with tab2:
         with subtab4: show_summary(df, 'Year', "รายปี")
             
         st.divider()
-        with st.expander("🔎 ดูข้อมูลดิบทั้งหมด"):
-            st.dataframe(df.sort_values(by='Date', ascending=False), use_container_width=True)
+        with st.expander("🔎 ดูข้อมูลดิบทั้งหมด (มีสีแยกประเภท)"):
+            # ใช้ style.applymap ใส่สีในข้อมูลดิบ
+            st.dataframe(df.sort_values(by='Date', ascending=False).style.applymap(highlight_rows), use_container_width=True)
     else:
         st.info("ยังไม่มีข้อมูลในระบบ")
