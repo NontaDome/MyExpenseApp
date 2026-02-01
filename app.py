@@ -30,9 +30,7 @@ def load_data():
     data = worksheet.get_all_records()
     if data:
         df = pd.DataFrame(data)
-        # แปลงตัวเลข
         df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-        # แปลงวันที่
         df['Date'] = pd.to_datetime(df['Date'])
         return df
     return pd.DataFrame()
@@ -51,9 +49,9 @@ with tab1:
         with c1: 
             date_input = st.date_input("วันที่", datetime.date.today())
         with c2: 
-            # 🛠️ แก้ไขตรงนี้: เพิ่ม step=1 เพื่อให้เลือกเวลาได้ละเอียดระดับวินาที
-            # และใช้ value=... เพื่อให้ Default เป็นเวลาปัจจุบันเสมอ
-            time_input = st.time_input("เวลา", value=datetime.datetime.now().time(), step=1)
+            # 🛠️ แก้ไขตรงนี้: เปลี่ยน step=1 เป็น step=60 (หน่วยเป็นวินาที คือ 1 นาที)
+            # จะทำให้เลือกนาทีได้เป๊ะๆ เช่น 12:13, 12:14 ไม่ต้องรอรอบ 15 นาทีครับ
+            time_input = st.time_input("เวลา", value=datetime.datetime.now().time(), step=60)
         with c3: 
             t_type = st.radio("ประเภท", ["รายจ่าย", "รายรับ"], horizontal=True)
 
@@ -81,44 +79,34 @@ with tab1:
 
 # ================= แท็บ 2: แดชบอร์ด =================
 with tab2:
-    st.header("📈 สรุปผลการเงิน (รายวัน/สัปดาห์/เดือน/ปี)")
+    st.header("📈 สรุปผลการเงิน")
     df = load_data()
 
     if not df.empty:
-        # เตรียมข้อมูลสำหรับ Grouping
         df['Year'] = df['Date'].dt.year
         df['Month'] = df['Date'].dt.strftime('%Y-%m (เดือน)')
         df['Week'] = df['Date'].dt.strftime('%Y-W%U (สัปดาห์)')
         df['Day'] = df['Date'].dt.strftime('%Y-%m-%d')
 
-        # สร้างแท็บย่อย 4 อัน
         subtab1, subtab2, subtab3, subtab4 = st.tabs(["📅 รายวัน", "🗓️ รายสัปดาห์", "📆 รายเดือน", "📅 รายปี"])
 
-        # ฟังก์ชันวาดกราฟและตาราง
         def show_summary(dataframe, group_col, title):
-            # 1. จัดกลุ่มข้อมูล
             summary = dataframe.groupby([group_col, 'Type'])['Amount'].sum().reset_index()
-            
-            # 2. ทำ Pivot เพื่อหา Net Balance
             pivot_df = summary.pivot(index=group_col, columns='Type', values='Amount').fillna(0)
             if 'รายรับ' not in pivot_df.columns: pivot_df['รายรับ'] = 0
             if 'รายจ่าย' not in pivot_df.columns: pivot_df['รายจ่าย'] = 0
             pivot_df['คงเหลือสุทธิ'] = pivot_df['รายรับ'] - pivot_df['รายจ่าย']
             pivot_df = pivot_df.sort_index(ascending=False)
 
-            # 3. แสดงกราฟแท่ง
             st.subheader(f"กราฟเปรียบเทียบ {title}")
             fig = px.bar(summary, x=group_col, y='Amount', color='Type', barmode='group',
                          color_discrete_map={'รายรับ':'#66BB6A', 'รายจ่าย':'#EF5350'})
             st.plotly_chart(fig, use_container_width=True)
 
-            # 4. แสดงตารางสรุป
             st.subheader(f"ตารางสรุป {title}")
-            display_df = pivot_df.copy()
-            display_df = display_df.applymap(lambda x: f"{x:,.2f}")
+            display_df = pivot_df.copy().applymap(lambda x: f"{x:,.2f}")
             st.dataframe(display_df, use_container_width=True)
 
-        # --- แสดงผลในแต่ละแท็บ ---
         with subtab1: show_summary(df, 'Day', "รายวัน")
         with subtab2: show_summary(df, 'Week', "รายสัปดาห์")
         with subtab3: show_summary(df, 'Month', "รายเดือน")
@@ -127,6 +115,5 @@ with tab2:
         st.divider()
         with st.expander("🔎 ดูข้อมูลดิบทั้งหมด"):
             st.dataframe(df.sort_values(by='Date', ascending=False), use_container_width=True)
-
     else:
         st.info("ยังไม่มีข้อมูลในระบบ")
