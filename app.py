@@ -34,20 +34,16 @@ def load_data():
         return df
     return pd.DataFrame()
 
-# 🎨 ฟังก์ชันสำหรับใส่สีในตาราง (Feature ใหม่)
+# 🎨 ฟังก์ชันสำหรับใส่สีในตาราง (ข้อมูลดิบ)
 def highlight_rows(val):
-    # 1. แยกสี รายรับ (เขียว) / รายจ่าย (แดง)
     if val == 'รายรับ':
-        return 'color: #28a745; font-weight: bold' # สีเขียว
+        return 'color: #28a745; font-weight: bold' # เขียว
     elif val == 'รายจ่าย':
-        return 'color: #dc3545; font-weight: bold' # สีแดง
-    
-    # 2. แยกสี บัญชี
+        return 'color: #dc3545; font-weight: bold' # แดง
     elif val == 'บัญชีออมทรัพย์':
-        return 'color: #007bff; font-weight: bold' # สีน้ำเงิน
+        return 'color: #00d4ff; font-weight: bold' # ฟ้าสว่าง (แก้จากน้ำเงิน)
     elif val == 'บัญชีเงินฝากดอกเบี้ยสูง':
-        return 'color: #fd7e14; font-weight: bold' # สีส้ม
-        
+        return 'color: #fd7e14; font-weight: bold' # ส้ม
     return ''
 
 # -------------------------------------------------------
@@ -87,12 +83,10 @@ with tab1:
             st.success("บันทึกเรียบร้อย!")
             st.cache_data.clear()
 
-    # แสดงประวัติล่าสุด (พร้อมสี)
     st.divider()
     st.subheader("📋 ประวัติล่าสุด")
     df_history = load_data()
     if not df_history.empty:
-        # ใช้ style.applymap เพื่อใส่สี
         st.dataframe(
             df_history.tail(5).sort_index(ascending=False).style.applymap(highlight_rows), 
             use_container_width=True
@@ -123,17 +117,17 @@ with tab2:
 
             st.subheader(f"กราฟเปรียบเทียบ {title}")
             fig = px.bar(summary, x=group_col, y='Amount', color='Type', barmode='group',
-                         color_discrete_map={'รายรับ':'#28a745', 'รายจ่าย':'#dc3545'}) # เปลี่ยนสีกราฟให้ตรงกัน
+                         color_discrete_map={'รายรับ':'#28a745', 'รายจ่าย':'#dc3545'}) 
             st.plotly_chart(fig, use_container_width=True)
 
             st.subheader(f"ตารางสรุป {title}")
             
-            # การใส่สีในตารางสรุป (Pivot Table)
-            # เราจะระบายสีตัวเลข: รายรับ=เขียว, รายจ่าย=แดง
+            # 🛠️ แก้ไขสีตรงนี้ครับ: 
+            # เปลี่ยนจาก 'color: blue' เป็น 'color: #00d4ff' (สีฟ้าสว่าง/Cyan) หรือ 'white' เพื่อให้อ่านง่าย
             styled_df = pivot_df.style.format("{:,.2f}") \
                 .applymap(lambda x: 'color: #28a745; font-weight: bold', subset=['รายรับ']) \
                 .applymap(lambda x: 'color: #dc3545; font-weight: bold', subset=['รายจ่าย']) \
-                .applymap(lambda x: 'color: blue; font-weight: bold' if x > 0 else 'color: red; font-weight: bold', subset=['คงเหลือสุทธิ'])
+                .applymap(lambda x: 'color: #00d4ff; font-weight: bold' if x > 0 else 'color: #ff4b4b; font-weight: bold', subset=['คงเหลือสุทธิ'])
 
             st.dataframe(styled_df, use_container_width=True)
 
@@ -143,8 +137,7 @@ with tab2:
         with subtab4: show_summary(df, 'Year', "รายปี")
             
         st.divider()
-        with st.expander("🔎 ดูข้อมูลดิบทั้งหมด (มีสีแยกประเภท)"):
-            # ใช้ style.applymap ใส่สีในข้อมูลดิบ
+        with st.expander("🔎 ดูข้อมูลดิบทั้งหมด"):
             st.dataframe(df.sort_values(by='Date', ascending=False).style.applymap(highlight_rows), use_container_width=True)
     else:
         st.info("ยังไม่มีข้อมูลในระบบ")
