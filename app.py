@@ -3,137 +3,126 @@ import gspread
 from google.oauth2.service_account import Credentials
 import pandas as pd
 import datetime
-import plotly.express as px  # เรียกใช้ไลบรารีกราฟ
+import plotly.express as px
 
 # -------------------------------------------------------
 # 1. เชื่อมต่อ Google Sheets
 # -------------------------------------------------------
-st.set_page_config(page_title="My Expense App", page_icon="💰")
+st.set_page_config(page_title="My Expense App", page_icon="💰", layout="wide")
 
-# โหลด Secrets จาก Streamlit Cloud
+# โหลด Secrets
 secrets = st.secrets["gcp_service_account"]
-
-# สร้าง Credentials
 scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 creds = Credentials.from_service_account_info(secrets, scopes=scopes)
 gc = gspread.authorize(creds)
 
-# เปิดไฟล์ Google Sheets (แก้ตรงนี้ให้เป็นลิงก์ของคุณถ้าจำเป็น)
-sheet_url = "https://docs.google.com/spreadsheets/d/1FbKe-hHVNi7Suo_XlP06qa8kcItPAoQzNNOFvsK38Ss/edit?gid=0#gid=0" 
-# *** อย่าลืมเอาลิงก์ Google Sheets ของคุณมาใส่แทน xxxxx ด้านบนนะครับ ***
+# URL ของ Google Sheets (ใช้ลิงก์เดิมของคุณได้เลย)
+sheet_url = "https://docs.google.com/spreadsheets/d/xxxxxxxxxxxxxxxxxxxx/edit" 
+# *** อย่าลืมเอาลิงก์ Google Sheets ของคุณมาใส่แทน xxxxx ด้านบน ***
 
 try:
     sh = gc.open_by_url(sheet_url)
     worksheet = sh.sheet1
 except Exception as e:
-    st.error(f"เกิดข้อผิดพลาดในการเชื่อมต่อ Google Sheets: {e}")
+    st.error(f"เชื่อมต่อ Google Sheets ไม่ได้: {e}")
     st.stop()
 
 # -------------------------------------------------------
-# 2. ส่วนหัวของแอป
+# 2. ส่วนหน้าจอแอป
 # -------------------------------------------------------
-st.title("💰 บันทึกรายรับ-รายจ่าย")
+st.title("💰 บันทึกรายรับ-รายจ่าย (ฉบับสมบูรณ์)")
 
-# สร้างแท็บ 2 หน้า
 tab1, tab2 = st.tabs(["📝 บันทึกข้อมูล", "📊 วิเคราะห์แดชบอร์ด"])
 
-# =======================================================
-# แท็บที่ 1: หน้าบันทึกข้อมูล (CODE เดิม)
-# =======================================================
+# ================= แท็บ 1: บันทึกข้อมูล =================
 with tab1:
     with st.form("expense_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            date_input = st.date_input("วันที่", datetime.date.today())
-            t_type = st.radio("ประเภท", ["รายจ่าย", "รายรับ"], horizontal=True)
-            account = st.selectbox("บัญชี/กระเป๋า", ["เงินสด", "K-Bank", "SCB", "TrueWallet", "เงินเก็บ"])
-        
-        with col2:
-            time_input = st.time_input("เวลา", datetime.datetime.now().time())
+        # แถวที่ 1
+        c1, c2, c3 = st.columns(3)
+        with c1: date_input = st.date_input("วันที่", datetime.date.today())
+        with c2: time_input = st.time_input("เวลา", datetime.datetime.now().time())
+        with c3: t_type = st.radio("ประเภท", ["รายจ่าย", "รายรับ"], horizontal=True)
+
+        # แถวที่ 2
+        c4, c5 = st.columns(2)
+        with c4: 
+            # ปรับชื่อบัญชีตามที่คุณต้องการ
+            account = st.selectbox("บัญชีที่เกี่ยวข้อง", 
+                                   ["บัญชีออมทรัพย์", "บัญชีเงินฝากดอกเบี้ยสูง", "เงินสด", "บัตรเครดิต", "อื่นๆ"])
+        with c5: 
             amount = st.number_input("จำนวนเงิน (บาท)", min_value=0.0, step=1.0)
-            channel = st.selectbox("ช่องทาง", ["เงินสด", "App ธนาคาร", "บัตรเครดิต", "QR Code"])
+
+        # แถวที่ 3 (เพิ่มใหม่: ต้นทาง/ปลายทาง)
+        c6, c7 = st.columns(2)
+        with c6: source = st.text_input("ต้นทาง (From)", placeholder="เช่น ชื่อคนโอน, ธนาคารต้นทาง")
+        with c7: destination = st.text_input("ปลายทาง (To)", placeholder="เช่น ชื่อคนรับ, ร้านค้า")
+
+        # แถวที่ 4
+        c8, c9 = st.columns(2)
+        with c8: channel = st.selectbox("ช่องทาง", ["App ธนาคาร", "เงินสด", "Scan QR", "บัตรเครดิต"])
+        with c9: note = st.text_input("หมายเหตุ", placeholder="รายละเอียดเพิ่มเติม")
         
-        note = st.text_input("หมายเหตุ (เช่น ค่าข้าว, ค่ารถ)")
-        
-        submitted = st.form_submit_button("บันทึกข้อมูล ✅")
+        submitted = st.form_submit_button("บันทึกข้อมูล ✅", use_container_width=True)
 
         if submitted:
-            # เตรียมข้อมูล
             date_str = date_input.strftime("%Y-%m-%d")
             time_str = time_input.strftime("%H:%M:%S")
-            row_data = [date_str, time_str, t_type, account, channel, amount, note]
             
-            # บันทึกลง Sheets
+            # เรียงข้อมูลให้ตรงกับหัวตารางใน Google Sheets
+            # Date, Time, Type, Account, Source, Destination, Channel, Amount, Note
+            row_data = [date_str, time_str, t_type, account, source, destination, channel, amount, note]
+            
             worksheet.append_row(row_data)
-            st.success("บันทึกข้อมูลเรียบร้อยแล้ว!")
-            st.cache_data.clear() # ล้าง Cache เพื่อให้ข้อมูลอัปเดตทันที
+            st.success("บันทึกข้อมูลสำเร็จ!")
+            st.cache_data.clear()
 
-    # แสดงประวัติล่าสุด 5 รายการ
+    # แสดงประวัติล่าสุด
+    st.divider()
     st.subheader("📋 ประวัติล่าสุด")
-    data = worksheet.get_all_records()
-    if data:
-        df = pd.DataFrame(data)
-        st.dataframe(df.tail(5).sort_index(ascending=False), use_container_width=True)
+    try:
+        data = worksheet.get_all_records()
+        if data:
+            df = pd.DataFrame(data)
+            # แสดงเฉพาะคอลัมน์ที่สำคัญ
+            st.dataframe(df.tail(5).sort_index(ascending=False), use_container_width=True)
+    except:
+        st.info("ยังไม่มีข้อมูล")
 
-# =======================================================
-# แท็บที่ 2: หน้าวิเคราะห์ข้อมูล (ส่วนที่เพิ่มใหม่)
-# =======================================================
+# ================= แท็บ 2: แดชบอร์ด =================
 with tab2:
-    st.header("ภาพรวมการเงินของคุณ")
-    
-    # ดึงข้อมูลมาคำนวณ
-    data = worksheet.get_all_records()
-    
-    if data:
-        df = pd.DataFrame(data)
-        
-        # แปลงข้อมูลตัวเลขและวันที่ให้คำนวณได้
-        df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-        df['Date'] = pd.to_datetime(df['Date'])
-        
-        # 1. การ์ดสรุปยอดเงิน (KPI)
-        total_income = df[df['Type'] == 'รายรับ']['Amount'].sum()
-        total_expense = df[df['Type'] == 'รายจ่าย']['Amount'].sum()
-        balance = total_income - total_expense
-        
-        col_a, col_b, col_c = st.columns(3)
-        col_a.metric("รายรับรวม", f"{total_income:,.2f} ฿", delta_color="normal")
-        col_b.metric("รายจ่ายรวม", f"{total_expense:,.2f} ฿", delta_color="inverse")
-        col_c.metric("คงเหลือสุทธิ", f"{balance:,.2f} ฿")
-        
-        st.divider() # เส้นขีดคั่น
+    st.header("ภาพรวมการเงิน")
+    try:
+        data = worksheet.get_all_records()
+        if data:
+            df = pd.DataFrame(data)
+            df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
+            
+            # สรุปยอด
+            inc = df[df['Type'] == 'รายรับ']['Amount'].sum()
+            exp = df[df['Type'] == 'รายจ่าย']['Amount'].sum()
+            
+            kpi1, kpi2, kpi3 = st.columns(3)
+            kpi1.metric("รายรับ", f"{inc:,.2f} ฿")
+            kpi2.metric("รายจ่าย", f"{exp:,.2f} ฿")
+            kpi3.metric("คงเหลือ", f"{inc - exp:,.2f} ฿")
+            
+            st.divider()
+            
+            # กราฟวงกลม
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                st.subheader("สัดส่วน รายรับ-รายจ่าย")
+                fig1 = px.pie(df, names='Type', values='Amount', color='Type', 
+                              color_discrete_map={'รายรับ':'#66BB6A', 'รายจ่าย':'#EF5350'})
+                st.plotly_chart(fig1, use_container_width=True)
+                
+            with col_g2:
+                st.subheader("แยกตามบัญชี")
+                fig2 = px.bar(df, x='Account', y='Amount', color='Type', barmode='group')
+                st.plotly_chart(fig2, use_container_width=True)
 
-        # 2. กราฟวงกลม: สัดส่วน รายรับ vs รายจ่าย
-        col_chart1, col_chart2 = st.columns(2)
-        
-        with col_chart1:
-            st.subheader("สัดส่วน รายรับ vs รายจ่าย")
-            fig_pie = px.pie(df, names='Type', values='Amount', color='Type',
-                             color_discrete_map={'รายรับ':'#4CAF50', 'รายจ่าย':'#FF5252'})
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-        # 3. กราฟแท่ง: รายจ่ายแยกตามบัญชี (ดูว่าเงินไหลออกจากไหนเยอะสุด)
-        with col_chart2:
-            st.subheader("รายจ่ายแยกตามบัญชี")
-            expense_df = df[df['Type'] == 'รายจ่าย']
-            if not expense_df.empty:
-                fig_bar = px.bar(expense_df, x='Account', y='Amount', color='Account',
-                                 title="ใช้เงินจากบัญชีไหนเยอะสุด?")
-                st.plotly_chart(fig_bar, use_container_width=True)
-            else:
-                st.info("ยังไม่มีข้อมูลรายจ่าย")
-
-        # 4. กราฟเส้น: แนวโน้มการใช้เงินรายวัน
-        st.subheader("📅 แนวโน้มการใช้จ่าย (Timeline)")
-        # รวมยอดเงินตามวันและประเภท
-        daily_df = df.groupby(['Date', 'Type'])['Amount'].sum().reset_index()
-        fig_line = px.line(daily_df, x='Date', y='Amount', color='Type', 
-                           markers=True, title="รายรับ-รายจ่าย ในแต่ละวัน")
-        st.plotly_chart(fig_line, use_container_width=True)
-        
-        # 5. ตารางข้อมูลทั้งหมด (ค้นหาได้)
-        with st.expander("🔎 ดูข้อมูลทั้งหมดแบบละเอียด"):
-            st.dataframe(df.sort_values(by='Date', ascending=False), use_container_width=True)
-
-    else:
-        st.info("ยังไม่มีข้อมูลในระบบ ให้เริ่มบันทึกที่แท็บแรกก่อนนะครับ")
+            # ตารางค้นหาละเอียด
+            with st.expander("ดูข้อมูลแบบละเอียด (ค้นหาได้)"):
+                st.dataframe(df, use_container_width=True)
+    except Exception as e:
+        st.info(f"รอข้อมูล... (ถ้าเพิ่งแก้หัวตาราง ให้ลองกด Refresh หน้าเว็บ 1 ทีครับ)")
