@@ -17,7 +17,7 @@ creds = Credentials.from_service_account_info(secrets, scopes=scopes)
 gc = gspread.authorize(creds)
 
 # URL ของ Google Sheets (ใช้ลิงก์เดิมของคุณได้เลย)
-sheet_url = "https://docs.google.com/spreadsheets/d/xxxxxxxxxxxxxxxxxxxx/edit" 
+sheet_url = "https://docs.google.com/spreadsheets/d/1FbKe-hHVNi7Suo_XlP06qa8kcItPAoQzNNOFvsK38Ss/edit?gid=0#gid=0" 
 # *** อย่าลืมเอาลิงก์ Google Sheets ของคุณมาใส่แทน xxxxx ด้านบน ***
 
 try:
