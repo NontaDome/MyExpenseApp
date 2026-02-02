@@ -7,65 +7,68 @@ from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials as UserCredentials
 
 # -------------------------------------------------------
-# 1. ตั้งค่าพื้นฐาน (ต้องอยู่บรรทัดแรกๆ)
+# 1. ตั้งค่าหน้าเว็บ
 # -------------------------------------------------------
 st.set_page_config(page_title="My Expense App", page_icon="💰", layout="wide")
 
-# อ่านค่า Secrets
-try:
-    CLIENT_CONFIG = {
-        "web": {
-            "client_id": st.secrets["web"]["client_id"],
-            "client_secret": st.secrets["web"]["client_secret"],
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-        }
-    }
-    REDIRECT_URI = st.secrets["web"]["redirect_uri"]
-except:
-    st.error("❌ ไม่พบการตั้งค่า Secrets กรุณาเช็คที่ Streamlit Cloud")
-    st.stop()
-
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.file"
-]
-
 # -------------------------------------------------------
-# 2. ฟังก์ชันระบบ Login (ต้องประกาศก่อนเรียกใช้)
+# 2. ระบบ Login (OAuth 2.0)
 # -------------------------------------------------------
 def check_login():
     if 'creds' not in st.session_state:
         if "code" in st.query_params:
             code = st.query_params["code"]
             try:
+                client_config = {
+                    "web": {
+                        "client_id": st.secrets["web"]["client_id"],
+                        "client_secret": st.secrets["web"]["client_secret"],
+                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                        "token_uri": "https://oauth2.googleapis.com/token",
+                    }
+                }
                 flow = Flow.from_client_config(
-                    CLIENT_CONFIG,
-                    scopes=SCOPES,
-                    redirect_uri=REDIRECT_URI
+                    client_config,
+                    scopes=[
+                        "https://www.googleapis.com/auth/spreadsheets",
+                        "https://www.googleapis.com/auth/drive.file"
+                    ],
+                    redirect_uri=st.secrets["web"]["redirect_uri"]
                 )
                 flow.fetch_token(code=code)
                 st.session_state['creds'] = flow.credentials
                 st.query_params.clear()
                 st.rerun()
             except Exception as e:
-                st.error(f"Login ผิดพลาด: {e}")
+                st.error(f"Login Error: {e}")
                 st.stop()
         else:
             return False
     return True
 
-# เรียกใช้ฟังก์ชัน Login
 if not check_login():
     st.title("🔒 กรุณาล็อกอิน")
-    flow = Flow.from_client_config(
-        CLIENT_CONFIG,
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI
-    )
-    auth_url, _ = flow.authorization_url(prompt='consent')
-    st.link_button("Sign in with Google", auth_url, type="primary")
-    st.stop() 
+    try:
+        flow = Flow.from_client_config(
+            {
+                "web": {
+                    "client_id": st.secrets["web"]["client_id"],
+                    "client_secret": st.secrets["web"]["client_secret"],
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                }
+            },
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive.file"
+            ],
+            redirect_uri=st.secrets["web"]["redirect_uri"]
+        )
+        auth_url, _ = flow.authorization_url(prompt='consent')
+        st.link_button("Sign in with Google", auth_url, type="primary")
+    except:
+        st.error("⚠️ ไม่พบการตั้งค่า Secrets")
+    st.stop()
 
 # -------------------------------------------------------
 # 3. เชื่อมต่อ Google Sheets
@@ -74,9 +77,8 @@ try:
     creds = st.session_state['creds']
     gc = gspread.authorize(creds)
     
-    # Sidebar: ปุ่ม Logout
     with st.sidebar:
-        st.success(f"✅ ล็อกอินสำเร็จ")
+        st.success("✅ เชื่อมต่อแล้ว")
         if st.button("Logout", type="secondary"):
             del st.session_state['creds']
             if 'sheet_url' in st.session_state:
@@ -84,109 +86,152 @@ try:
             st.rerun()
         st.divider()
 
-    # ตรวจสอบ URL Sheet
     if 'sheet_url' not in st.session_state:
         st.session_state['sheet_url'] = ''
 
     if not st.session_state['sheet_url']:
-        st.info("👋 ยินดีต้อนรับ! กรุณาวางลิงก์ Google Sheet ของคุณ")
-        user_sheet_url = st.text_input("🔗 วางลิงก์ที่นี่ (ต้องมีหัวตาราง Date, Time, Type, Category, Amount, Note)")
-        if user_sheet_url:
-            st.session_state['sheet_url'] = user_sheet_url
+        st.info("👋 ยินดีต้อนรับ! กรุณาวางลิงก์ Google Sheet")
+        st.markdown("""
+        **โครงสร้างหัวตาราง (Row 1):**
+        `Date` | `Time` | `Type` | `Account` | `Source` | `Destination` | `Channel` | `Amount` | `Note`
+        """)
+        url_input = st.text_input("🔗 วางลิงก์ Google Sheets ที่นี่")
+        if url_input:
+            st.session_state['sheet_url'] = url_input
             st.rerun()
         else:
             st.stop()
 
-    # เปิด Sheet
     sh = gc.open_by_url(st.session_state['sheet_url'])
     worksheet = sh.sheet1
 
 except Exception as e:
     st.error(f"❌ เชื่อมต่อไม่ได้: {e}")
-    if st.button("กรอกลิงก์ใหม่"):
+    if st.button("ใส่ลิงก์ใหม่"):
         st.session_state['sheet_url'] = ''
         st.rerun()
     st.stop()
 
 # -------------------------------------------------------
-# 4. โหลดข้อมูลและแสดงผล (ส่วนหลัก)
+# 4. โหลดข้อมูล (แก้ไขให้รองรับ 9 คอลัมน์)
 # -------------------------------------------------------
-
-# ฟังก์ชันโหลดข้อมูล
-def load_data():
+def load_data_safe():
+    # กำหนดหัวตารางที่ถูกต้องตามที่คุณต้องการ
+    COLUMNS = ["Date", "Time", "Type", "Account", "Source", "Destination", "Channel", "Amount", "Note"]
+    
     try:
         data = worksheet.get_all_records()
         if not data:
-            return pd.DataFrame(columns=["Date", "Time", "Type", "Category", "Amount", "Note"])
-        return pd.DataFrame(data)
-    except:
-        return pd.DataFrame(columns=["Date", "Time", "Type", "Category", "Amount", "Note"])
+            return pd.DataFrame(columns=COLUMNS)
+        
+        df = pd.DataFrame(data)
+        
+        # ตรวจสอบว่าคอลัมน์ไหนขาดหายไป ให้เติมเข้าไป
+        for col in COLUMNS:
+            if col not in df.columns:
+                df[col] = "" 
+                
+        # เลือกมาเฉพาะคอลัมน์ที่ใช้งานจริง เพื่อจัดเรียงให้สวยงาม
+        return df[COLUMNS]
+        
+    except Exception as e:
+        return pd.DataFrame(columns=COLUMNS)
 
-# โหลดข้อมูลจริง
-df = load_data()
+df = load_data_safe()
 
-# สร้าง Tabs
+# -------------------------------------------------------
+# 5. UI Application
+# -------------------------------------------------------
 tab1, tab2, tab3 = st.tabs(["📝 บันทึก", "📊 สรุปผล", "📋 ประวัติ"])
 
-# --- Tab 1: ฟอร์มบันทึก ---
+# --- Tab 1: ฟอร์มบันทึก (แก้ไขให้ครบ 9 ช่อง) ---
 with tab1:
-    st.header("บันทึกรายรับ-รายจ่าย")
-    # สำคัญ: ทุกอย่างใน Form ต้องย่อหน้าเข้าไป
+    st.header("บันทึกรายการ (แบบละเอียด)")
     with st.form("expense_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
-            date_in = st.date_input("วันที่", value=datetime.date.today())
-            time_in = st.time_input("เวลา", value=datetime.datetime.now().time())
+            date_in = st.date_input("Date (วันที่)", value=datetime.date.today())
         with c2:
-            type_in = st.selectbox("ประเภท", ["รายจ่าย", "รายรับ"])
-            amount_in = st.number_input("จำนวนเงิน", min_value=0.0, step=10.0)
-            
-        category_in = st.text_input("หมวดหมู่", placeholder="เช่น อาหาร, เดินทาง")
-        note_in = st.text_input("โน้ต", placeholder="กันลืม")
+            time_in = st.time_input("Time (เวลา)", value=datetime.datetime.now().time())
+        with c3:
+            type_in = st.selectbox("Type (ประเภท)", ["รายจ่าย", "รายรับ"])
+
+        c4, c5 = st.columns(2)
+        with c4:
+            account_in = st.selectbox("Account (บัญชี)", ["บัญชีออมทรัพย์", "บัญชีเงินฝากดอกเบี้ยสูง", "เงินสด", "บัตรเครดิต", "อื่นๆ"])
+        with c5:
+            amount_in = st.number_input("Amount (จำนวนเงิน)", min_value=0.0, step=10.0)
+
+        c6, c7 = st.columns(2)
+        with c6:
+            source_in = st.text_input("Source (ต้นทาง)", placeholder="เช่น ชื่อคนโอน")
+        with c7:
+            dest_in = st.text_input("Destination (ปลายทาง)", placeholder="เช่น ร้านป้าแจ่ม")
+
+        c8, c9 = st.columns(2)
+        with c8:
+            channel_in = st.selectbox("Channel (ช่องทาง)", ["App ธนาคาร", "เงินสด", "Scan QR", "บัตรเครดิต"])
+        with c9:
+            note_in = st.text_input("Note (หมายเหตุ)", placeholder="บันทึกเพิ่มเติม")
         
-        # ปุ่ม Submit ต้องอยู่ใน block ของ with st.form
-        submitted = st.form_submit_button("💾 บันทึกข้อมูล", use_container_width=True)
-        
-        if submitted:
+        if st.form_submit_button("💾 บันทึกข้อมูล", use_container_width=True):
             if amount_in > 0:
-                worksheet.append_row([
-                    str(date_in), str(time_in), type_in, 
-                    category_in, amount_in, note_in
-                ])
-                st.success("บันทึกเรียบร้อย!")
-                st.rerun()
+                try:
+                    # เรียงข้อมูลให้ตรงกับหัวตาราง 9 ช่อง
+                    row_data = [
+                        str(date_in), 
+                        str(time_in), 
+                        type_in, 
+                        account_in, 
+                        source_in, 
+                        dest_in, 
+                        channel_in, 
+                        amount_in, 
+                        note_in
+                    ]
+                    worksheet.append_row(row_data)
+                    st.success("บันทึกเรียบร้อย!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
             else:
                 st.warning("กรุณาระบุจำนวนเงิน")
 
 # --- Tab 2: Dashboard ---
 with tab2:
     st.header("ภาพรวมการเงิน")
+    
     if not df.empty:
         df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
         
-        # คำนวณยอด
         income = df[df['Type'] == 'รายรับ']['Amount'].sum()
         expense = df[df['Type'] == 'รายจ่าย']['Amount'].sum()
         balance = income - expense
         
-        # แสดง Card
-        c1, c2, c3 = st.columns(3)
-        c1.metric("รายรับ", f"{income:,.0f}")
-        c2.metric("รายจ่าย", f"{expense:,.0f}")
-        c3.metric("คงเหลือ", f"{balance:,.0f}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("รายรับ", f"{income:,.0f}")
+        col2.metric("รายจ่าย", f"{expense:,.0f}")
+        col3.metric("คงเหลือ", f"{balance:,.0f}")
         
-        # กราฟ Pie
-        exp_data = df[df['Type'] == 'รายจ่าย']
-        if not exp_data.empty:
-            fig = px.pie(exp_data, values='Amount', names='Category', title='สัดส่วนรายจ่าย')
-            st.plotly_chart(fig, use_container_width=True)
+        st.divider()
+        
+        # กราฟแท่งเปรียบเทียบตามบัญชี (Account)
+        try:
+            st.subheader("ยอดเงินแยกตามบัญชี (Account)")
+            acc_summary = df.groupby(['Account', 'Type'])['Amount'].sum().reset_index()
+            if not acc_summary.empty:
+                fig = px.bar(acc_summary, x='Account', y='Amount', color='Type', barmode='group',
+                             color_discrete_map={'รายรับ':'#28a745', 'รายจ่าย':'#dc3545'})
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("ยังไม่มีข้อมูลบัญชี")
+        except:
+            st.warning("ยังไม่สามารถแสดงกราฟได้")
+            
     else:
-        st.info("ยังไม่มีข้อมูลให้แสดง")
+        st.info("ยังไม่มีข้อมูล")
 
-# --- Tab 3: Table ---
+# --- Tab 3: History ---
 with tab3:
-    st.header("ประวัติรายการ")
-    if not df.empty:
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.write("ว่างเปล่า...")
+    st.header("ประวัติรายการทั้งหมด")
+    st.dataframe(df, use_container_width=True)
