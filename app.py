@@ -1,50 +1,108 @@
 import streamlit as st
 import gspread
-from google.oauth2.service_account import Credentials
 import pandas as pd
 import datetime
 import plotly.express as px
+from google_auth_oauthlib.flow import Flow
+from google.oauth2.credentials import Credentials as UserCredentials
 
 # -------------------------------------------------------
-# 1. เชื่อมต่อ Google Sheets
+# 1. ตั้งค่าและระบบ Login (OAuth 2.0)
 # -------------------------------------------------------
 st.set_page_config(page_title="My Expense App", page_icon="💰", layout="wide")
 
-try:
-    secrets = st.secrets["gcp_service_account"]
-    scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    creds = Credentials.from_service_account_info(secrets, scopes=scopes)
-    gc = gspread.authorize(creds)
+# การตั้งค่า OAuth (อ่านจาก secrets)
+CLIENT_CONFIG = {
+    "web": {
+        "client_id": st.secrets["web"]["client_id"],
+        "client_secret": st.secrets["web"]["client_secret"],
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+    }
+}
+# ต้องแก้ Redirect URI ให้ตรงกับที่รันอยู่ (localhost หรือ cloud)
+REDIRECT_URI = st.secrets["web"]["redirect_uri"] 
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.file"
+]
+
+# ฟังก์ชันจัดการ Login
+def check_login():
+    # 1. เช็คว่ามี Token ใน Session หรือยัง (Login ค้างไว้ไหม)
+    if 'creds' not in st.session_state:
+        # ถ้ายังไม่มี ให้ดูว่า URL มี code ส่งกลับมาไหม (กลับมาจาก Google)
+        if "code" in st.query_params:
+            code = st.query_params["code"]
+            
+            # แลก Code เป็น Token
+            flow = Flow.from_client_config(
+                CLIENT_CONFIG,
+                scopes=SCOPES,
+                redirect_uri=REDIRECT_URI
+            )
+            flow.fetch_token(code=code)
+            st.session_state['creds'] = flow.credentials
+            
+            # เคลียร์ URL ให้สวยงาม (ลบ code ออก)
+            st.query_params.clear()
+            st.rerun()
+        else:
+            # ถ้าไม่มี Code และไม่มี Token -> แสดงปุ่ม Login
+            return False
+    return True
+
+# --- เริ่มต้นการทำงาน ---
+if not check_login():
+    st.title("🔒 กรุณาล็อกอิน")
+    st.write("แอปนี้ใช้ Google Account ของคุณในการบันทึกข้อมูล (ข้อมูลเป็นส่วนตัว 100%)")
     
-    # *** อย่าลืมแก้ลิงก์ Google Sheets ตรงนี้เหมือนเดิมนะครับ ***
-    sheet_url = "https://docs.google.com/spreadsheets/d/1FbKe-hHVNi7Suo_XlP06qa8kcItPAoQzNNOFvsK38Ss/edit?gid=0#gid=0" 
-    sh = gc.open_by_url(sheet_url)
-    worksheet = sh.sheet1
+    # สร้างลิงก์ Login
+    flow = Flow.from_client_config(
+        CLIENT_CONFIG,
+        scopes=SCOPES,
+        redirect_uri=REDIRECT_URI
+    )
+    auth_url, _ = flow.authorization_url(prompt='consent')
+    
+    st.link_button("Sign in with Google", auth_url, type="primary")
+    st.stop() # หยุดทำงานแค่นี้ รอ User ล็อกอิน
+
+# -------------------------------------------------------
+# 2. เชื่อมต่อ Google Sheets (ในนามของผู้ใช้)
+# -------------------------------------------------------
+try:
+    # ใช้ Credential ของผู้ใช้ที่ล็อกอินเข้ามา
+    creds = st.session_state['creds']
+    gc = gspread.authorize(creds)
+
+    st.sidebar.success("✅ ล็อกอินแล้ว")
+    if st.sidebar.button("Logout"):
+        del st.session_state['creds']
+        st.rerun()
+
+    # ให้ผู้ใช้ใส่ลิงก์ Sheet ของตัวเอง (เหมือนเดิม แต่ไม่ต้องแชร์ให้ใครแล้ว!)
+    if 'sheet_url' not in st.session_state:
+        st.session_state['sheet_url'] = ''
+    
+    st.info("กรุณาสร้าง Google Sheet ของคุณเอง แล้วนำลิงก์มาวางด้านล่าง (ไม่ต้องแชร์ให้ใคร)")
+    user_sheet_url = st.text_input("🔗 วางลิงก์ Google Sheets ของคุณ", value=st.session_state['sheet_url'])
+    
+    if user_sheet_url:
+        st.session_state['sheet_url'] = user_sheet_url
+        sh = gc.open_by_url(user_sheet_url)
+        worksheet = sh.sheet1
+    else:
+        st.stop()
+
 except Exception as e:
-    st.error(f"เกิดข้อผิดพลาดในการเชื่อมต่อ: {e}")
+    st.error(f"เกิดข้อผิดพลาด: {e}")
     st.stop()
 
-# ฟังก์ชันโหลดข้อมูล
-def load_data():
-    data = worksheet.get_all_records()
-    if data:
-        df = pd.DataFrame(data)
-        df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce').fillna(0)
-        df['Date'] = pd.to_datetime(df['Date'])
-        return df
-    return pd.DataFrame()
-
-# 🎨 ฟังก์ชันสำหรับใส่สีในตาราง (ข้อมูลดิบ)
-def highlight_rows(val):
-    if val == 'รายรับ':
-        return 'color: #28a745; font-weight: bold' # เขียว
-    elif val == 'รายจ่าย':
-        return 'color: #dc3545; font-weight: bold' # แดง
-    elif val == 'บัญชีออมทรัพย์':
-        return 'color: #00d4ff; font-weight: bold' # ฟ้าสว่าง (แก้จากน้ำเงิน)
-    elif val == 'บัญชีเงินฝากดอกเบี้ยสูง':
-        return 'color: #fd7e14; font-weight: bold' # ส้ม
-    return ''
+# -------------------------------------------------------
+# 3. ส่วนโปรแกรมเดิม (วางต่อจากนี้ได้เลย)
+# -------------------------------------------------------
+# ... (วางโค้ด def load_data, highlight_rows และ UI เดิมต่อตรงนี้)
 
 # -------------------------------------------------------
 # 2. ส่วนหน้าจอแอป
