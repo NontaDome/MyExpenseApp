@@ -4,3 +4,4 @@ pandas
 plotly
 google-auth-oauthlib
 google-auth
+extra-streamlit-components
