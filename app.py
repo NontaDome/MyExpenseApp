@@ -55,16 +55,13 @@ def get_google_auth_config():
     }
 
 def check_login():
-    # 1. เช็ค Session (ถ้าเพิ่งเปิดหน้าเว็บมา จะยังไม่มี)
     if 'creds' in st.session_state:
         return True
 
-    # 2. เช็คคุ้กกี้ (หา Refresh Token)
     refresh_token = cookie_manager.get(cookie="google_refresh_token")
     
     if refresh_token:
         try:
-            # เจอคุ้กกี้ -> Auto Login ทันที
             client_config = get_google_auth_config()
             creds = UserCredentials(
                 None, 
@@ -74,14 +71,11 @@ def check_login():
                 client_secret=client_config["web"]["client_secret"]
             )
             st.session_state['creds'] = creds
-            st.toast("⚡ กู้คืนการล็อกอินสำเร็จ!")
             return True
         except Exception as e:
-            # ถ้า Token เก่าเสีย (เช่น เปลี่ยนรหัส Google) ต้องล็อกอินใหม่
             st.warning("Session หมดอายุ กรุณาล็อกอินใหม่")
             return False
 
-    # 3. เช็ค URL (กรณีเพิ่งกด Login กลับมา)
     if "code" in st.query_params:
         code = st.query_params["code"]
         try:
@@ -94,10 +88,8 @@ def check_login():
             flow.fetch_token(code=code)
             st.session_state['creds'] = flow.credentials
             
-            # --- จุดที่แก้ไข: ตั้งเวลาหมดอายุ 10 ปี (3650 วัน) ---
             expires = datetime.datetime.now() + datetime.timedelta(days=3650)
             cookie_manager.set("google_refresh_token", flow.credentials.refresh_token, expires_at=expires)
-            # ------------------------------------------------
             
             st.query_params.clear()
             return True
@@ -107,7 +99,6 @@ def check_login():
     
     return False
 
-# --- UI ส่วนตรวจสอบสิทธิ์ ---
 if not check_login():
     st.title("🔒 Security Check")
     st.info("กรุณาล็อกอิน Google ครั้งแรก (ระบบจะจำไว้ 10 ปี)")
@@ -123,7 +114,6 @@ if not check_login():
         st.error("⚠️ ไม่พบ Secrets")
     st.stop()
 
-# ผ่าน Google แล้ว -> เช็ค PIN
 if st.session_state['locked']:
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
@@ -134,7 +124,7 @@ if st.session_state['locked']:
     st.stop()
 
 # -------------------------------------------------------
-# 3. เชื่อมต่อ Google Sheets
+# 3. เชื่อมต่อ Google Sheets (จำลิงก์ 10 ปี)
 # -------------------------------------------------------
 try:
     creds = st.session_state['creds']
@@ -145,21 +135,36 @@ try:
         if st.button("🔒 ล็อกหน้าจอ", type="primary"):
             lock_app()
         st.divider()
-        if st.button("🔄 อัปเดตข้อมูล", use_container_width=True):
+        if st.button("🔄 อัปเดตข้อมูลล่าสุด", use_container_width=True):
+            st.rerun()
+            
+        # เพิ่มปุ่มสำหรับเปลี่ยนลิงก์ Google Sheet โดยเฉพาะ
+        if st.button("✏️ เปลี่ยนลิงก์ Google Sheet", use_container_width=True):
+            cookie_manager.delete("user_sheet_url")
+            st.session_state['sheet_url'] = ''
             st.rerun()
             
         if st.button("ออกจากระบบ (ล้างค่าทั้งหมด)", type="secondary"):
-            cookie_manager.delete("google_refresh_token") # ลบ Cookie ทิ้ง
+            cookie_manager.delete("google_refresh_token")
+            cookie_manager.delete("user_sheet_url")
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
 
-    if 'sheet_url' not in st.session_state: st.session_state['sheet_url'] = ''
+    # ลองดึง URL ที่เคยจำไว้ในคุกกี้มาใช้งาน
+    saved_sheet_url = cookie_manager.get(cookie="user_sheet_url")
+    if 'sheet_url' not in st.session_state: 
+        st.session_state['sheet_url'] = saved_sheet_url if saved_sheet_url else ''
+
+    # ถ้ายังไม่มีลิงก์ ให้แสดงช่องกรอก
     if not st.session_state['sheet_url']:
-        st.info("👋 ยินดีต้อนรับ! กรุณาวางลิงก์ Google Sheet")
+        st.info("👋 ยินดีต้อนรับ! กรุณาวางลิงก์ Google Sheet (ระบบจะจำไว้ให้ 10 ปี)")
         url_input = st.text_input("🔗 วางลิงก์ Google Sheets ที่นี่")
         if url_input:
             st.session_state['sheet_url'] = url_input
+            # บันทึกลิงก์ลงในคุกกี้ 10 ปี
+            expires = datetime.datetime.now() + datetime.timedelta(days=3650)
+            cookie_manager.set("user_sheet_url", url_input, expires_at=expires)
             st.rerun()
         else:
             st.stop()
@@ -168,13 +173,15 @@ try:
     worksheet = sh.sheet1
 
 except Exception as e:
-    st.error(f"❌ เชื่อมต่อไม่ได้: {e}")
-    if st.button("ลองใหม่"):
+    st.error(f"❌ เชื่อมต่อไม่ได้ หรือลิงก์อาจไม่ถูกต้อง: {e}")
+    if st.button("ใส่ลิงก์ใหม่"):
+        cookie_manager.delete("user_sheet_url")
+        st.session_state['sheet_url'] = ''
         st.rerun()
     st.stop()
 
 # -------------------------------------------------------
-# 4. โหลดข้อมูล & UI (9 Columns)
+# 4. โหลดข้อมูล & UI
 # -------------------------------------------------------
 def load_data_safe():
     COLUMNS = ["Date", "Time", "Type", "Account", "Source", "Destination", "Channel", "Amount", "Note"]
@@ -217,7 +224,8 @@ with tab1:
             with c7: dest_in = st.text_input("Destination")
 
             c8, c9 = st.columns(2)
-            with c8: channel_in = st.selectbox("Channel", ["App ธนาคาร", "เงินสด", "Scan QR", "บัตรเครดิต"])
+            # เพิ่ม "บัญชีเงินฝากดอกเบี้ยสูง" ในตัวเลือกของช่องทาง (Channel)
+            with c8: channel_in = st.selectbox("Channel", ["App ธนาคาร", "เงินสด", "Scan QR", "บัตรเครดิต", "บัญชีเงินฝากดอกเบี้ยสูง"])
             with c9: note_in = st.text_input("Note")
             
             if st.form_submit_button("💾 ยืนยัน", use_container_width=True):
