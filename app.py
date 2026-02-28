@@ -136,6 +136,8 @@ try:
             lock_app()
         st.divider()
         if st.button("🔄 อัปเดตข้อมูลล่าสุด", use_container_width=True):
+            # เคลียร์ Cache ก่อนดึงข้อมูลใหม่
+            get_sheet_data.clear()
             st.rerun()
             
         if st.button("✏️ เปลี่ยนลิงก์ Google Sheet", use_container_width=True):
@@ -146,6 +148,7 @@ try:
         if st.button("ออกจากระบบ (ล้างค่าทั้งหมด)", type="secondary"):
             cookie_manager.delete("google_refresh_token")
             cookie_manager.delete("user_sheet_url")
+            get_sheet_data.clear() # ล้าง Cache ข้อมูลด้วย
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
@@ -177,12 +180,18 @@ except Exception as e:
     st.stop()
 
 # -------------------------------------------------------
-# 4. โหลดข้อมูล & UI
+# 4. โหลดข้อมูล & UI (Optimized)
 # -------------------------------------------------------
-def load_data_safe():
+
+# Optimize: ใช้ Cache เพื่อไม่ให้แอปดึงข้อมูลจาก Sheets ทุกครั้งที่ขยับหน้าจอ
+@st.cache_data(ttl=600, show_spinner=False)
+def get_sheet_data(_ws):
+    return _ws.get_all_records()
+
+def load_data_safe(_ws):
     COLUMNS = ["Date", "Time", "Type", "Account", "Source", "Destination", "Channel", "Amount", "Note"]
     try:
-        data = worksheet.get_all_records()
+        data = get_sheet_data(_ws)
         if not data: return pd.DataFrame(columns=COLUMNS)
         df = pd.DataFrame(data)
         for col in COLUMNS:
@@ -197,7 +206,19 @@ def load_data_safe():
         return df
     except: return pd.DataFrame(columns=COLUMNS)
 
-df = load_data_safe()
+# Optimize: ย้ายฟังก์ชันสร้างกราฟมาประกาศระดับ Global ลดการสร้างฟังก์ชันซ้ำซ้อน
+def show_summary(dataframe, group_col, title):
+    summary = dataframe.groupby([group_col, 'Type'])['Amount'].sum().reset_index()
+    fig = px.bar(summary, x=group_col, y='Amount', color='Type', barmode='group',
+                 color_discrete_map={'รายรับ':'#28a745', 'รายจ่าย':'#dc3545'}, text_auto='.2s')
+    st.plotly_chart(fig, use_container_width=True)
+    pivot = summary.pivot(index=group_col, columns='Type', values='Amount').fillna(0)
+    if 'รายรับ' not in pivot.columns: pivot['รายรับ'] = 0
+    if 'รายจ่าย' not in pivot.columns: pivot['รายจ่าย'] = 0
+    pivot['คงเหลือ'] = pivot['รายรับ'] - pivot['รายจ่าย']
+    st.dataframe(pivot.sort_index(ascending=False).style.format("{:,.2f}"), use_container_width=True)
+
+df = load_data_safe(worksheet)
 
 st.title("💰 My Expense App")
 tab1, tab2, tab3 = st.tabs(["📝 จดบันทึก", "📊 แดชบอร์ด", "📋 ประวัติ"])
@@ -212,7 +233,6 @@ with tab1:
             with c3: type_in = st.selectbox("Type", ["รายจ่าย", "รายรับ"])
 
             c4, c5 = st.columns(2)
-            # แก้ไข: ย้ายมาอยู่ตรงนี้ (Account)
             with c4: account_in = st.selectbox("Account", ["บัญชีออมทรัพย์", "บัญชีเงินฝากดอกเบี้ยสูง", "เงินสด", "บัตรเครดิต", "อื่นๆ"])
             with c5: amount_in = st.number_input("Amount", min_value=0.0, step=10.0)
 
@@ -221,7 +241,6 @@ with tab1:
             with c7: dest_in = st.text_input("Destination")
 
             c8, c9 = st.columns(2)
-            # แก้ไข: เอาออกจากตรงนี้ (Channel) คืนค่าเดิม
             with c8: channel_in = st.selectbox("Channel", ["App ธนาคาร", "เงินสด", "Scan QR", "บัตรเครดิต"])
             with c9: note_in = st.text_input("Note")
             
@@ -230,23 +249,14 @@ with tab1:
                     try:
                         worksheet.append_row([str(date_in), str(time_in), type_in, account_in, source_in, dest_in, channel_in, amount_in, note_in])
                         st.success("บันทึกแล้ว!")
+                        # ล้างค่า Cache หลังบันทึกข้อมูล เพื่อให้หน้าสรุปดึงข้อมูลที่อัปเดตล่าสุด
+                        get_sheet_data.clear()
                         st.rerun()
                     except Exception as e: st.error(f"Error: {e}")
                 else: st.warning("ระบุยอดเงิน")
 
 with tab2:
     if not df.empty and df['Amount'].sum() > 0:
-        def show_summary(dataframe, group_col, title):
-            summary = dataframe.groupby([group_col, 'Type'])['Amount'].sum().reset_index()
-            fig = px.bar(summary, x=group_col, y='Amount', color='Type', barmode='group',
-                         color_discrete_map={'รายรับ':'#28a745', 'รายจ่าย':'#dc3545'}, text_auto='.2s')
-            st.plotly_chart(fig, use_container_width=True)
-            pivot = summary.pivot(index=group_col, columns='Type', values='Amount').fillna(0)
-            if 'รายรับ' not in pivot.columns: pivot['รายรับ'] = 0
-            if 'รายจ่าย' not in pivot.columns: pivot['รายจ่าย'] = 0
-            pivot['คงเหลือ'] = pivot['รายรับ'] - pivot['รายจ่าย']
-            st.dataframe(pivot.sort_index(ascending=False).style.format("{:,.2f}"), use_container_width=True)
-
         t1, t2, t3, t4 = st.tabs(["รายวัน", "รายสัปดาห์", "รายเดือน", "รายปี"])
         with t1: show_summary(df, 'Day', "รายวัน")
         with t2: show_summary(df, 'Week', "รายสัปดาห์")
