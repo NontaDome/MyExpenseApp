@@ -138,7 +138,6 @@ try:
         if st.button("🔄 อัปเดตข้อมูลล่าสุด", use_container_width=True):
             st.rerun()
             
-        # เพิ่มปุ่มสำหรับเปลี่ยนลิงก์ Google Sheet โดยเฉพาะ
         if st.button("✏️ เปลี่ยนลิงก์ Google Sheet", use_container_width=True):
             cookie_manager.delete("user_sheet_url")
             st.session_state['sheet_url'] = ''
@@ -151,18 +150,15 @@ try:
                 del st.session_state[key]
             st.rerun()
 
-    # ลองดึง URL ที่เคยจำไว้ในคุกกี้มาใช้งาน
     saved_sheet_url = cookie_manager.get(cookie="user_sheet_url")
     if 'sheet_url' not in st.session_state: 
         st.session_state['sheet_url'] = saved_sheet_url if saved_sheet_url else ''
 
-    # ถ้ายังไม่มีลิงก์ ให้แสดงช่องกรอก
     if not st.session_state['sheet_url']:
         st.info("👋 ยินดีต้อนรับ! กรุณาวางลิงก์ Google Sheet (ระบบจะจำไว้ให้ 10 ปี)")
         url_input = st.text_input("🔗 วางลิงก์ Google Sheets ที่นี่")
         if url_input:
             st.session_state['sheet_url'] = url_input
-            # บันทึกลิงก์ลงในคุกกี้ 10 ปี
             expires = datetime.datetime.now() + datetime.timedelta(days=3650)
             cookie_manager.set("user_sheet_url", url_input, expires_at=expires)
             st.rerun()
@@ -216,7 +212,8 @@ with tab1:
             with c3: type_in = st.selectbox("Type", ["รายจ่าย", "รายรับ"])
 
             c4, c5 = st.columns(2)
-            with c4: account_in = st.selectbox("Account", ["บัญชีออมทรัพย์", "เงินสด", "บัตรเครดิต", "อื่นๆ"])
+            # แก้ไข: ย้ายมาอยู่ตรงนี้ (Account)
+            with c4: account_in = st.selectbox("Account", ["บัญชีออมทรัพย์", "บัญชีเงินฝากดอกเบี้ยสูง", "เงินสด", "บัตรเครดิต", "อื่นๆ"])
             with c5: amount_in = st.number_input("Amount", min_value=0.0, step=10.0)
 
             c6, c7 = st.columns(2)
@@ -224,8 +221,8 @@ with tab1:
             with c7: dest_in = st.text_input("Destination")
 
             c8, c9 = st.columns(2)
-            # เพิ่ม "บัญชีเงินฝากดอกเบี้ยสูง" ในตัวเลือกของช่องทาง (Channel)
-            with c8: channel_in = st.selectbox("Channel", ["App ธนาคาร", "เงินสด", "Scan QR", "บัตรเครดิต", "บัญชีเงินฝากดอกเบี้ยสูง"])
+            # แก้ไข: เอาออกจากตรงนี้ (Channel) คืนค่าเดิม
+            with c8: channel_in = st.selectbox("Channel", ["App ธนาคาร", "เงินสด", "Scan QR", "บัตรเครดิต"])
             with c9: note_in = st.text_input("Note")
             
             if st.form_submit_button("💾 ยืนยัน", use_container_width=True):
